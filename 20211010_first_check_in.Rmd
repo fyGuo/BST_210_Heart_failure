@@ -7,7 +7,7 @@ output: pdf_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-knitr::opts_knit$set(root.dir = "D:\\BST210\\BST_210_Heart_failure")
+knitr::opts_knit$set(root.dir = "C:/Users/Tayler99/Desktop/BST_210_Heart_failure")
 ```
 
 ```{r, message = F}
@@ -51,9 +51,12 @@ complete.cases(dta) %>% all()
 summary(dta$ser_crt)
 sd(dta$ser_crt)
 p1 <- ggplot(dta) + 
-        geom_histogram(aes(x = ser_crt), fill = "DarkCyan")
+        geom_histogram(aes(x = ser_crt), fill = "DarkCyan") +
+    ylab("Number of individuals") +
+    xlab("Serum creatinine level (mg/dL)")
 p2 <- ggplot(dta) + 
-        geom_boxplot(aes(y = ser_crt), fill = "DarkCyan")
+        geom_boxplot(aes(y = ser_crt), fill = "DarkCyan") +
+    ylab("Serum creatinine level (mg/dL)")
 ggarrange(p1, p2)
 
 ggsave("20211001_exposure_distribution.png", width = 150, height = 80,
@@ -82,18 +85,23 @@ sd(dta$time[dta$death == 1])
 
 # make plots
 p1 <- ggplot(dta) + 
-        geom_histogram(aes(x = time), fill = "DarkRed")
+        geom_histogram(aes(x = time), fill = "DarkRed") +
+    xlab("Time to event (days)") +
+    ylab("Number of individuals")
 p2 <- ggplot(dta) + 
-        geom_boxplot(aes(y = time), fill = "DarkRed")
+        geom_boxplot(aes(y = time), fill = "DarkRed") +
+    ylab("Time to event (days)")
 ggarrange(p1, p2)
 ggsave("20211001_death_distribution.png", width = 150, height = 80,
        units = "mm")
 
 # make a plot by death = 0
 
-ggplot(dta) + 
-        geom_boxplot(aes(y = time, group = death, fill = as.factor(death))) + 
-        scale_fill_manual(values = c("DarkCyan", "DarkRed"))
+dta1<-dta %>% mutate(Outcome = case_when(death=="0"~"Censored or Alive",death=="1"~"Deceased"))
+ggplot(dta1) + 
+        geom_boxplot(aes(y = time, group = death, fill = Outcome)) + 
+        scale_fill_manual(values = c("DarkCyan", "DarkRed")) +
+    ylab("Time to event (days)")
 ggsave("20211001_death_distribution_by_death.png", width = 150, height = 80,
        units = "mm")
 
@@ -172,7 +180,7 @@ lapply(c("death", "death_30", "sex", "smoking", "anemia", "dbt",
 ggsurvplot(
     fit = survfit(Surv(time, death) ~ ser_crt_group, data = dta,),
     xlab = "Days", 
-    ylab = "Overall survival probability") 
+    ylab = "Overall survival probability")
 
 ggsave("20211001_survival_plots_crude.png", width = 150, height = 80,
        units = "mm")
