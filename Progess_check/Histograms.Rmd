@@ -1,0 +1,22 @@
+```{r}
+dat<-read.csv("C:/Users/Tayler99/Desktop/BST_210_Heart_failure/heart_f.csv")
+head(dat)
+dim(dat)
+```
+Our data on heart failure mortality consist of observations gathered from 299 individuals. The data included 12 variables that are potentially associated with heart failure mortality, namely: age, anaemia, creatinine phosphokinase level, diabetes, ejection fraction, blood pressure, platelets, serum creatinine level, serum sodium level, sex, and smoking status. The data also recorded each individual's time of follow-up.
+```{r}
+sum(is.na(dat))
+```
+There are no missing values in the whole dataset, which means that we don't to exclude any individuals from our analysis. The final sample size is still 299.
+```{r}
+dat1<-dat[dat$serum_creatinine<=1.5,]
+dat2<-dat[dat$serum_creatinine>1.5,]
+hist(dat$serum_creatinine,breaks = 20,xlim=c(0,10),main="Histogram of serum creatinine distribution across the whole dataset",xlab="Serum creatinine level (mg/dL)")
+hist(dat1$serum_creatinine,breaks = 8,xlim = c(0,1.5),main="Serum creatinine distribution across normal-level individuals",xlab="Serum creatinine level (mg/dL)")
+hist(dat2$serum_creatinine,breaks = 17,xlim=c(1.5,10),main="Serum creatinine distribution across abnormal-level individuals",xlab="Serum creatinine level (mg/dL)")
+```
+```{r}
+datd<-dat[dat$DEATH_EVENT==1,]
+hist(datd$time,breaks = 10,main="Histogram of time to death across deceased individuals",xlab="Time (days)",xlim=c(0,275))
+```
+
