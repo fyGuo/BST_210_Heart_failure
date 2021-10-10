@@ -1,0 +1,187 @@
+---
+title: "20211010_first_check_in"
+author: "Jinglun Li; Fuyu Guo; Xinhao Li"
+date: "10/10/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = F}
+library(tidyverse)
+library(survival)
+library(ggpubr)
+library(survminer)
+```
+
+```{r}
+#############################
+# load data
+setwd("BST_210_Heart_failure")
+dta <- read.csv("heart_f.csv")
+
+# select variables we will use
+dta <- dplyr::select(dta,
+                     "age", "sex", "anaemia",
+                     "diabetes", "ejection_fraction", "smoking",
+                     "platelets", "serum_creatinine", "serum_sodium",
+                     "time", "DEATH_EVENT")
+
+# rename the variables to make our work easier
+names(dta) <- c("age", "sex", "anemia",
+                     "dbt", "ef", "smoking",
+                     "plat", "ser_crt", "ser_na",
+                     "time", "death")
+
+# check sample size
+dim(dta)
+
+
+# check if there is any missing value in variables
+complete.cases(dta) %>% all()
+# no missing value
+
+
+
+#######################################################
+#######################################################
+# check exposure distribution 
+summary(dta$ser_crt)
+sd(dta$ser_crt)
+p1 <- ggplot(dta) + 
+        geom_histogram(aes(x = ser_crt), fill = "DarkCyan")
+p2 <- ggplot(dta) + 
+        geom_boxplot(aes(y = ser_crt), fill = "DarkCyan")
+ggarrange(p1, p2)
+
+ggsave("20211001_exposure_distribution.png", width = 150, height = 80,
+       units = "mm")
+
+
+# calculate the normal level proportion
+dta$ser_crt_group <- if_else(dta$ser_crt <= 1.5, "normal", "abnormal")
+dta$ser_crt_group %>% table 
+dta$ser_crt_group %>% table %>% prop.table()
+
+
+
+
+#######################################################
+#######################################################
+# check total person-time
+sum(dta$time)
+summary(dta$time)
+sd(dta$time)
+
+
+# check time to the event among patients who died finally
+summary(dta$time[dta$death == 1])
+sd(dta$time[dta$death == 1])
+
+# make plots
+p1 <- ggplot(dta) + 
+        geom_histogram(aes(x = time), fill = "DarkRed")
+p2 <- ggplot(dta) + 
+        geom_boxplot(aes(y = time), fill = "DarkRed")
+ggarrange(p1, p2)
+ggsave("20211001_death_distribution.png", width = 150, height = 80,
+       units = "mm")
+
+# make a plot by death = 0
+
+ggplot(dta) + 
+        geom_boxplot(aes(y = time, group = death, fill = as.factor(death))) + 
+        scale_fill_manual(values = c("DarkCyan", "DarkRed"))
+ggsave("20211001_death_distribution_by_death.png", width = 150, height = 80,
+       units = "mm")
+
+
+
+# calculate the proportion of death in 30 days
+dta$death_30 <- NA
+dta$death_30[dta$death == 1& dta$time <= 30] <- "Yes"
+dta$death_30[(dta$death == 1& dta$time > 30) |
+               (dta$death == 0& dta$time > 30)] <- "No"
+dta$death_30[dta$death == 0& dta$time <= 30] <- "Censored"
+table(dta$death_30)
+table(dta$death_30) %>% prop.table()
+
+
+
+
+
+##############################################
+#############################################
+# Check Characteristics of the 299 patient by serum creatinine level
+#  Table 1 #
+# check continuous variables
+re1 <- dta %>% group_by(ser_crt_group) %>%
+        summarise(avg_crt = mean(ser_crt),
+                  sd_crt = sd(ser_crt),
+                  avg_time = mean(time),
+                  sd_time = sd(time),
+                  avg_age = mean(age),
+                  sd_age = sd(age),
+                  avg_plat = mean(plat),
+                  sd_plat = sd(plat),
+                  avg_na = mean(ser_na),
+                  sd_na = sd(ser_na)) %>%
+        t()
+
+
+re1 <- re1[, c(2,1)]
+re1
+
+# t-test for continuous variables
+lapply(c("ser_crt", "time", "age", "plat", "ser_na"), 
+       function (x){
+               dta$x <- dta[,x]
+               t.test(x~ser_crt_group, data = dta)$p.value %>% return()
+       })
+
+###########################################################
+# categorical variables
+
+# rename the categories
+dta$ser_crt_group <- factor(dta$ser_crt_group , levels = c("normal", "abnormal"))
+dta$sex <- if_else(dta$sex == 1, "male", "female")
+dta$ef[dta$ef <= 30] <- "<=30"
+dta$ef[dta$ef > 30 & dta$ef < 45] <- "41-44"
+dta$ef[dta$ef >= 45] <- ">=45"
+
+
+# check the proportion
+lapply(c("death", "death_30", "sex", "smoking", "anemia", "dbt",
+         "ef"), 
+       function(x){
+        s1 <- table(dta[,x], dta$ser_crt_group)
+        s2 <- table(dta[,x], dta$ser_crt_group) %>% as.matrix()
+        s2 <- cbind(s2[,1]/sum(dta$ser_crt_group == "normal"),  s2[,1]/sum(dta$ser_crt_group == "abnormal"))
+        s3 <- table(dta[,x], dta$ser_crt_group) %>% chisq.test()
+        list(s1, s2, s3) %>% return()
+         })
+
+
+
+##################################################################
+#############################################################
+# survival plots for crude association
+
+ggsurvplot(
+    fit = survfit(Surv(time, death) ~ ser_crt_group, data = dta,),
+    xlab = "Days", 
+    ylab = "Overall survival probability") 
+
+ggsave("20211001_survival_plots_crude.png", width = 150, height = 80,
+       units = "mm")
+
+```
+
+
+
+
+
+
+
