@@ -1,0 +1,156 @@
+---
+title: "20111105_second_check_in"
+author: "Fuyu Guo"
+date: "11/5/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r, message = F}
+library(tidyverse)
+library(survival)
+library(ggpubr)
+library(survminer)
+library(glmnet)
+library(car)
+library(pROC)
+```
+
+```{r}
+#############################
+# load data
+dta <- read.csv("D:\\BST_210_Heart_failure\\heart_f.csv")
+
+# select variables we will use
+dta <- dplyr::select(dta,
+                     "age", "sex", "anaemia",
+                     "diabetes", "ejection_fraction", "smoking",
+                     "platelets", "serum_creatinine", "serum_sodium",
+                     "time", "DEATH_EVENT")
+
+# rename the variables to make our work easier
+names(dta) <- c("age", "sex", "anemia",
+                     "dbt", "ef", "smoking",
+                     "plat", "ser_crt", "ser_na",
+                     "time", "death")
+dta$ser_crt_ab <- if_else(dta$ser_crt <= 1.5, 0, 1)
+# check sample size
+dim(dta)
+
+
+# check if there is any missing value in variables
+complete.cases(dta) %>% all()
+# no missing value
+```
+
+## Linear, flexible/additive or other methods (LASSO, ridge) 
+```{r}
+# choose patients who died by the end of the study
+dta_line <- dplyr::filter(dta, death == 1)
+# there are only 96 people died by the end
+
+################################################
+# a crude analysis
+fit_lin_1 <- lm(time~ser_crt, data = dta_line)
+summary(fit_lin_1)
+
+#################################################
+# conduct a lasso regression to choose covariate sets for linear serum creatine as a continuous variable
+x <- dplyr::select(dta_line, -death, -time, -ser_crt_ab) %>% 
+        as.matrix() 
+y <- dta_line$time %>% as.vector()
+cv <-  cv.glmnet(x, y, type.measure = "mse", nfolds = 4)
+plot(cv)
+```
+The results of the lasso tells us that we should not include any covariates in the model. Only intercept is enough. This result is not helpful in guiding covariates selection, partly because of the small sample size and null association.
+```{r}
+# we will adjust for age and sex based on the background knowledge
+fit_lin_2 <- lm(time~ser_crt + age + sex, data = dta_line)
+summary(fit_lin_2)
+
+########################################################
+#try use serum creatine as a binary variable
+
+fit_lin_3 <- lm(time~ser_crt_ab, data = dta_line)
+summary(fit_lin_3)
+fit_lin_4 <- lm(time~ser_crt_ab + age + sex, data = dta_line)
+summary(fit_lin_2)
+```
+
+
+```{r}
+# we will do some model diagnostics with the most spares model
+# residul analysis
+qqnorm(rstudent(fit_lin_2))
+
+plot(rstudent(fit_lin_2), dta_line$time)
+```
+The residuals are not normally distributed. Also the residuals are clearly linear associated with the outcome. Thus, the linear model's assumption about nomarlity is violated.
+
+
+## Logistic, multinomial, ordinal:
+```{r}
+# assess the death by the 30-days
+dta$death_30 <- NA
+dta$death_30[dta$death == 1& dta$time <= 30] <- "Yes"
+dta$death_30[(dta$death == 1& dta$time > 30) |
+               (dta$death == 0& dta$time > 30)] <- "No"
+dta$death_30[dta$death == 0& dta$time <= 30] <- "Censored"
+table(dta$death_30) 
+# there are 5 patients censored at the 30 days
+# we will just drop them 
+
+dta_log <- dplyr::filter(dta, death_30 != "Censored")
+dta_log$death_30 <- if_else(dta_log$death_30 == "Yes", 1, 0)
+###########################################################
+# a crude logistic model
+fit_log_1 <- glm(death_30~ser_crt, family = "binomial", data = dta_log)
+summary(fit_log_1)
+fit_log_1$coefficients %>% exp
+confint(fit_log_1) %>% exp # check 95% CI
+
+# use lasso to help determine the covariate sets
+x <- dplyr::select(dta_log, -death, -time, -death_30, -ser_crt_ab) %>% 
+        as.matrix() 
+y <- dta_log$death_30 %>% as.vector()
+cv <-  cv.glmnet(x, y, type.measure = "mse", nfolds = 4)
+plot(cv)
+cv$glmnet.fit
+coef(cv, s = "lambda.min")
+best_cov <- c("age", "anemia", "ef", "plat", "ser_crt", "ser_na")
+coef(cv, s = 0.010050)
+include_cov <- c("sex", "age", "anemia", "ef", "plat", "ser_crt", "ser_na")
+coef(cv, s = 0.016010)
+exclude_cov <- c("age", "anemia", "ef",  "ser_crt", "ser_na")
+
+```
+
+According to the lasso results, we will perform three logitstic regressions and compare their results.
+```{r}
+log_fun <- function(set){
+        x_matrix <- dta_log[set,]
+        y <- dta_log$death_30
+        fit <- glm(y~x, family = "binomial")
+        OR <- coef(fit)["xser_crt"] %>% exp()
+        CI <- confint(fit)["xser_crt",] %>% exp()
+        aic <- fit$aic
+        return(list(OR, CI, aic))
+}
+lapply(list(best_cov, exclude_cov, include_cov), log_fun)
+```
+
+Diagnostics for the model
+```{r}
+log_fit <- glm(death_30~age+anemia+ef+plat+ser_crt+ser_na, family = "binomial", data = dta_log)
+residualPlots(log_fit)
+```
+Discrimination
+```{r}
+library(pROC)
+predprob <- predict(log_fit,type=c("response"))
+roccurve <- roc(dta_log$death_30 ~ predprob)
+plot(roccurve,col="red")
+auc(roccurve)
+```
