@@ -21,7 +21,7 @@ library(pROC)
 ```{r}
 #############################
 # load data
-dta <- read.csv("D:\\BST_210_Heart_failure\\heart_f.csv")
+dta <- read.csv("/Users/fuyuguo/BST_210_Heart_failure/heart_f.csv")
 
 # select variables we will use
 dta <- dplyr::select(dta,
@@ -153,4 +153,36 @@ predprob <- predict(log_fit,type=c("response"))
 roccurve <- roc(dta_log$death_30 ~ predprob)
 plot(roccurve,col="red")
 auc(roccurve)
+```
+
+
+## Poisson Regression
+We will collapse the individual observations into total groups.
+```{r}
+dta$age_65 <- if_else(dta$age >= 65, 1, 0)
+dta$ef_group <- case_when(dta$ef <= 30 ~ "low",
+                          dta$ef >30 & dta$ef < 45 ~ "normal",
+                          dta$ef >=45 ~ "high")
+
+dta$plat_group <- if_else(dta$plat >= median(dta$plat), "high", "low")
+dta$ser_na_group <- if_else(dta$ser_na >= median(dta$ser_na), "high", "low")
+
+dta_pos <- dta %>% group_by(age_65, sex, ef_group, plat_group, anemia, ser_na_group, ser_crt_ab) %>%
+        summarise(death = sum(death),
+                  time = sum(time))
+names(dta_pos)
+pois_fit <- glm(death~ser_crt_ab  + sex+ age_65+ef_group+plat_group+anemia + ser_na_group, offset = log(time), family = poisson(), data = dta_pos)
+dim(dta_pos)
+pois_fit %>% summary()
+coef(pois_fit) %>% exp()
+confint(pois_fit) %>% exp()
+residualPlots(pois_fit)
+```
+
+For a quasi-Poisson
+```{r}
+quai_pois_fit <- glm(death~ser_crt_ab  + sex+ age_65+ef_group+plat_group+anemia + ser_na_group, offset = log(time), family = quasipoisson(), data = dta_pos)
+quai_pois_fit %>% summary()
+coef(quai_pois_fit) %>% exp()
+confint(quai_pois_fit) %>% exp()
 ```
