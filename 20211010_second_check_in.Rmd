@@ -1,6 +1,6 @@
 ---
 title: "20111105_second_check_in"
-author: "Fuyu Guo"
+author: "Jinglun Li; Fuyu Guo; Xinhao Li"
 date: "11/5/2021"
 output: pdf_document
 ---
@@ -21,7 +21,7 @@ library(pROC)
 ```{r}
 #############################
 # load data
-dta <- read.csv("/Users/fuyuguo/BST_210_Heart_failure/heart_f.csv")
+dta <- read.csv("D:/BST_210_Heart_failure/heart_f.csv")
 
 # select variables we will use
 dta <- dplyr::select(dta,
@@ -82,14 +82,24 @@ summary(fit_lin_2)
 
 ```{r}
 # we will do some model diagnostics with the most spares model
-# residul analysis
-qqnorm(rstudent(fit_lin_2))
+# residual analysis
 
-plot(rstudent(fit_lin_2), dta_line$time)
+par(mfrow = c(2,2))
+plot(fit_lin_2)
+
+
+
 ```
-The residuals are not normally distributed. Also the residuals are clearly linear associated with the outcome. Thus, the linear model's assumption about nomarlity is violated.
+
+- Variance is not equal.
+- The residual is not normally distributed.
+- Although there are three high influence values, they are still within the Cook's distance boundary. Thus, we conclude there is no high influence from outliers or leverage values in the model.
 
 
+```{r}
+# adjusted R^2 in the model above
+summary(fit_lin_2)
+```
 ## Logistic, multinomial, ordinal:
 ```{r}
 # assess the death by the 30-days
@@ -117,6 +127,7 @@ x <- dplyr::select(dta_log, -death, -time, -death_30, -ser_crt_ab) %>%
 y <- dta_log$death_30 %>% as.vector()
 cv <-  cv.glmnet(x, y, type.measure = "mse", nfolds = 4)
 plot(cv)
+cv$lambda.min
 cv$glmnet.fit
 coef(cv, s = "lambda.min")
 best_cov <- c("age", "anemia", "ef", "plat", "ser_crt", "ser_na")
