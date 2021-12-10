@@ -1,0 +1,250 @@
+---
+title: "Untitled"
+author: "Jinglun Li"
+date: "12/7/2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r, message = F}
+library(tidyverse)
+library(survival)
+library(ggpubr)
+library(survminer)
+library(glmnet)
+library(car)
+library(pROC)
+```
+
+
+```{r}
+dta <- read.csv("~/Desktop/BST210/final/final/heart_f.csv")
+# select variables we will use
+dta <- dplyr::select(dta,
+                     "age", "sex", "anaemia",
+                     "diabetes", "ejection_fraction", "smoking",
+                     "platelets", "serum_creatinine", "serum_sodium",
+                     "time", "DEATH_EVENT")
+# rename the variables to make our work easier
+names(dta) <- c("age", "sex", "anemia",
+                     "dbt", "ef", "smoking",
+                     "plat", "ser_crt", "ser_na",
+                     "time", "death")
+dta$ser_crt_ab <- if_else(dta$ser_crt <= 1.5, 0, 1)
+dta$ser_crt_group <- if_else(dta$ser_crt <= 1.5, "normal", "abnormal")
+dta$age_65 <- if_else(dta$age >= 65, 1, 0)
+dta$ef_group <- case_when(dta$ef <= 30 ~ "low",
+                          dta$ef >30 & dta$ef < 45 ~ "normal",
+                          dta$ef >=45 ~ "high")
+dta$ser_crt_group %>% table
+dta$ser_crt_group %>% table %>% prop.table()
+```
+
+```{r}
+fit.km <- survfit(Surv(time, death == 1) ~ ser_crt_group, data = dta)
+plot(fit.km, main='Kaplan Meier', xlab='Days', ylab='S(t)')
+```
+
+```{r}
+ggsurvplot(
+    fit = survfit(Surv(time, death) ~ 1, data = dta,),
+    xlab = "Days", 
+    ylab = "Overall survival probability",
+    )
+```
+
+
+```{r}
+ggsurvplot(
+    fit = survfit(Surv(time, death) ~ ser_crt_group, data = dta,),
+    xlab = "Days", 
+    ylab = "Overall survival probability",
+    surv.median.line = "h",
+    legend.title = "Serum creatinine level",
+    legend.labs = c("Abnormal", "Normal"),
+    pval = TRUE)
+```
+
+
+Kaplan-Meier analysis was done to estimate the probability of death events during the follow-up period. The upper survival curve for normal Serum creatinine level is above the lower curve for standard care across the entire .. days of follow-up, visually indicating that populations with a normal Serum creatinine level showed a much better survival pattern. 
+
+```{r}
+ggsurvplot(
+    fit = survfit(Surv(time, death) ~ ef_group, data = dta,),
+    xlab = "Days", 
+    ylab = "Overall survival probability",
+    surv.median.line = "h",
+    legend.title = "EF level",
+    legend.labs = c("high", "low", "normal"),
+    pval = TRUE)
+```
+
+
+
+
+```{r}
+ggsurvplot(
+    fit = survfit(Surv(time, death) ~ age_65, data = dta,),
+    xlab = "Days", 
+    ylab = "Overall survival probability",
+    surv.median.line = "h",
+    legend.title = "Age",
+    legend.labs = c("<65", ">=65"),
+    pval = TRUE) 
+```
+
+
+```{r}
+ggsurvplot(
+    fit = survfit(Surv(time, death) ~ sex, data = dta,),
+    xlab = "Days", 
+    ylab = "Overall survival probability",
+    surv.median.line = "h",
+    pval = TRUE) 
+```
+
+```{r}
+dta <- read.csv("~/Desktop/BST210/final/final/heart_f.csv")
+# select variables we will use
+dta <- dplyr::select(dta,
+                     "age", "sex", "anaemia",
+                     "diabetes", "ejection_fraction", "smoking",
+                     "platelets", "serum_creatinine", "serum_sodium",
+                     "time", "DEATH_EVENT")
+# rename the variables to make our work easier
+names(dta) <- c("age", "sex", "anemia",
+                     "dbt", "ef", "smoking",
+                     "plat", "ser_crt", "ser_na",
+                     "time", "death")
+dta$ser_crt_ab <- if_else(dta$ser_crt <= 1.5, 0, 1)
+
+
+
+x <- dplyr::select(dta, -death, -time, -ser_crt_ab) %>% 
+        as.matrix() 
+y <- dta %>% select( time, death) %>% mutate(status = death) %>% mutate(death = NULL) %>% as.matrix() 
+as.numeric(y[,2])
+
+
+lasso.mod <- glmnet(x, y, family = "cox")
+plot(lasso.mod)
+coef(lasso.mod, s = 0.05)
+
+cvfit <- cv.glmnet(x, y, family = "cox", type.measure = "mse")
+### cvfit <- cv.glmnet(x, y, family = "cox", type.measure = "C")
+plot(cvfit)
+
+cox1 <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt + ser_na, ties = "exact", data = dta)
+summary(cox1)
+AIC(cox1)
+
+
+cox2 <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt + ser_na + sex, ties = "exact", data = dta)
+AIC(cox2)
+
+cox3 <- coxph(Surv(time, death) ~ age  + anemia + ef + ser_crt , ties = "exact", data = dta)
+AIC(cox3)
+```
+```{r}
+lambda.min<- cvfit$lambda.min
+lasso_coe <- predict(lasso.mod, s = lambda.min, type = "coefficients") 
+coe <- as.matrix(lasso_coe)[,1]
+coe
+
+# Variable importance (vip) is determined by magnitude of the standardized # coefficients - topmost are highest in 'importance' to the model:
+library(vip)
+vip(lasso.mod, num_features=30, geom="point")
+
+
+```
+```{r}
+### categorical serum crt：
+x <- dplyr::select(dta, -death, -time, -ser_crt) %>% 
+        as.matrix() 
+y <- dta %>% select( time, death) %>% mutate(status = death) %>% mutate(death = NULL) %>% as.matrix() 
+as.numeric(y[,2])
+
+
+lasso.mod_cat <- glmnet(x, y, family = "cox")
+plot(lasso.mod_cat)
+coef(lasso.mod_cat, s = 0.05)
+
+cvfit_cat <- cv.glmnet(x, y, family = "cox", type.measure = "mse")
+### cvfit <- cv.glmnet(x, y, family = "cox", type.measure = "C")
+plot(cvfit_cat)
+
+cox1_cat <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt_ab + ser_na , ties = "exact", data = dta)
+summary(cox1_cat)
+AIC(cox1_cat)
+
+
+cox2_cat <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt_ab + ser_na + sex, ties = "exact", data = dta)
+AIC(cox2_cat)
+
+cox3_cat <- coxph(Surv(time, death) ~ age  + anemia + ef + ser_crt_ab , ties = "exact", data = dta)
+AIC(cox3_cat)
+
+
+#### Basically same result
+```
+
+```{r}
+cox_modi1 <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt + ser_na + ser_crt*ef, ties = "exact", data = dta)
+summary(cox_modi1)
+AIC(cox_modi1)
+
+
+cox_modi2 <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt + ser_na + ser_crt*age, ties = "exact", data = dta)
+summary(cox_modi2)
+AIC(cox_modi2)
+
+cox_modi3 <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt + ser_na + ser_crt*ser_na, ties = "exact", data = dta)
+summary(cox_modi3)
+AIC(cox_modi3)
+
+cox_modi4 <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt + ser_na + ser_crt*anemia, ties = "exact", data = dta)
+summary(cox_modi4)
+AIC(cox_modi4)
+```
+
+
+```{r}
+#### modification of categorical 
+cox_catmodi1 <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt_ab + ser_na + ser_crt_ab*ef, ties = "exact", data = dta)
+summary(cox_catmodi1)
+AIC(cox_catmodi1)
+
+
+cox_catmodi2 <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt_ab + ser_na + ser_crt_ab*age, ties = "exact", data = dta)
+summary(cox_catmodi2)
+AIC(cox_catmodi2)
+
+cox_catmodi3 <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt_ab + ser_na + ser_crt_ab*ser_na, ties = "exact", data = dta)
+summary(cox_catmodi3)
+AIC(cox_modi3)
+
+cox_catmodi4 <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt_ab + ser_na + ser_crt_ab*anemia, ties = "exact", data = dta)
+summary(cox_catmodi4)
+AIC(cox_modi4)
+```
+
+
+```{r}
+surv_crt  = survfit(Surv(time, death) ~ ser_crt_ab, data = dta,)
+plot(surv_crt, fun = "cloglog", xlab = "", ylab = "", main = "")
+```
+```{r}
+### maybe just need ser_crt only 
+resid.wt.scho <- cox.zph(cox1_cat) 
+resid.wt.scho
+plot(resid.wt.scho)
+
+resid.wt.scho1 <- cox.zph(cox1)
+resid.wt.scho1
+plot(resid.wt.scho1)
+
+```
+
+
+
