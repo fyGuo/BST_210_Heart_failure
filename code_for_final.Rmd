@@ -1,0 +1,244 @@
+---
+title: "Untitled"
+author: "Jinglun Li; Fuyu Guo; Xinhao Li"
+date: "12/10/2021"
+output: pdf_document
+---
+
+```{r, message = F}
+library(tidyverse)
+library(survival)
+library(ggpubr)
+library(survminer)
+library(glmnet)
+library(car)
+library(pROC)
+```
+
+
+```{r}
+setwd("D:\\BST_210_Heart_failure")
+dta <- read.csv("heart_f.csv")
+# select variables we will use
+dta <- dplyr::select(dta,
+                     "age", "sex", "anaemia",
+                     "diabetes", "ejection_fraction", "smoking",
+                     "platelets", "serum_creatinine", "serum_sodium",
+                     "time", "DEATH_EVENT")
+# rename the variables to make our work easier
+names(dta) <- c("age", "sex", "anemia",
+                     "dbt", "ef", "smoking",
+                     "plat", "ser_crt", "ser_na",
+                     "time", "death")
+dta$ser_crt_ab <- if_else(dta$ser_crt <= 1.5, 0, 1)
+dta$ser_crt_group <- if_else(dta$ser_crt <= 1.5, "normal", "abnormal")
+dta$age_65 <- if_else(dta$age >= 65, 1, 0)
+dta$ef_group <- case_when(dta$ef <= 30 ~ "low",
+                          dta$ef >30 & dta$ef < 45 ~ "normal",
+                          dta$ef >=45 ~ "high")
+```
+
+
+
+## Descpritive analysis 
+```{r}
+library(table1)
+table1(~.|ser_crt_group, data = dta)
+```
+
+### KM-curves
+
+```{r}
+# checked the overall person times
+sum(dta$time)
+sum(dta$death == 1)
+median(dta$time)
+fit.km_overall <- survfit(Surv(time, death == 1) ~ 1, data = dta)
+quantile(fit.km_overall, 0.25)
+```
+
+
+```{r}
+fit.km <- survfit(Surv(time, death == 1) ~ ser_crt_group, data = dta)
+fit.km
+```
+
+
+```{r}
+ggsurvplot(
+    fit = survfit(Surv(time, death) ~ ser_crt_group, data = dta,),
+    xlab = "Days", 
+    ylab = "Overall survival probability",
+    surv.median.line = "h",
+    legend.title = "Serum creatinine level",
+    legend.labs = c("Abnormal", "Normal"),
+    pval = TRUE)
+```
+
+
+Kaplan-Meier analysis was done to estimate the probability of death events during the follow-up period. The upper survival curve for normal Serum creatinine level is above the lower curve for standard care across the entire. days of follow-up, visually indicating that populations with a normal Serum creatinine level showed a much better survival pattern. 
+
+
+## Lasso
+
+### Binary serum creatinine
+```{r}
+x <- dplyr::select(dta, -death, -time, -ser_crt, -age_65, -ef_group, -ser_crt_group) %>% 
+        as.matrix() 
+y <- dta %>% select( time, death) %>% mutate(status = death) %>% mutate(death = NULL) %>% as.matrix() 
+cvfit <- cv.glmnet(x, y, family = "cox", type.measure = "deviance")
+plot(cvfit)
+
+cvfit$lambda.min %>% log()
+coef(cvfit, s = cvfit$lambda.min)
+
+
+
+cvfit$glmnet.fit
+coef(cvfit, s = 0.070160)
+log(0.070160)
+coef(cvfit, s = 0.019070)
+log(0.019070)
+```
+
+
+### Continuous serum creatinine
+```{r}
+x <- dplyr::select(dta, -death, -time, -ser_crt_ab, -age_65, -ef_group, -ser_crt_group) %>% 
+        as.matrix() 
+y <- dta %>% select( time, death) %>% mutate(status = death) %>% mutate(death = NULL) %>% as.matrix() 
+cvfit1 <- cv.glmnet(x, y, family = "cox", type.measure = "deviance")
+
+png("lasso_ser_crt.png", width = 200, height = 200, units = "mm", res = 300)
+par(mfrow = c(2,1))
+plot(cvfit)
+plot(cvfit1)
+dev.off()
+
+
+
+cvfit1$glmnet.fit
+cvfit1$lambda.min
+coef(cvfit1, s = cvfit$lambda.min)
+log(cvfit1$lambda.min)
+coef(cvfit1, s = 0.020860) # choose the lambda to include 6 variables
+log(0.020860)
+coef(cvfit, s = 0.058040) # choose the lambda to include 4 variables
+log(0.058040)
+### cvfit <- cv.glmnet(x, y, family = "cox", type.measure = "C")
+plot(cvfit)
+
+
+
+```
+
+
+## Cox models
+
+```{r}
+# Crude models
+crude_binary <- coxph(Surv(time, death) ~ ser_crt_ab, ties = "exact", data = dta)
+summary(crude_binary)
+confint(crude_binary) %>% exp()
+
+
+crude_cont <- coxph(Surv(time, death) ~ ser_crt, ties = "exact", data = dta)
+summary(crude_cont)
+confint(crude_cont) %>% exp()
+
+# Lasso selection models
+
+cox1_binary<- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt_ab + ser_na, ties = "exact", data = dta)
+summary(cox1_binary)
+
+
+cox1_cont<- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt + ser_na, ties = "exact", data = dta)
+summary(cox1_cont)
+
+# Add sex as fully adjusted model
+cox2_binary <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt_ab + ser_na + sex, ties = "exact", data = dta)
+summary(cox2_binary)
+
+
+cox2_cont <- coxph(Surv(time, death) ~ age + anemia + ef + ser_crt + ser_na + sex, ties = "exact", data = dta)
+summary(cox2_cont)
+
+
+
+
+```
+
+### Effect modification
+
+```{r}
+
+cox_modi1 <- coxph(Surv(time, death) ~ age  + sex + anemia + ef + ser_crt + ser_na + ser_crt*age, ties = "exact", data = dta)
+summary(cox_modi1)
+
+cox_modi2 <- coxph(Surv(time, death) ~ age  + sex + anemia + ef + ser_crt + ser_na + ser_crt*sex, ties = "exact", data = dta)
+summary(cox_modi2)
+
+
+cox_modi3 <- coxph(Surv(time, death) ~ age + sex + anemia + ef + ser_crt + ser_na + ser_crt*anemia, ties = "exact", data = dta)
+summary(cox_modi3)
+
+cox_modi4 <- coxph(Surv(time, death) ~ age + sex + anemia + ef + ser_crt + ser_na + ser_crt*ef, ties = "exact", data = dta)
+summary(cox_modi4)
+
+cox_modi5 <- coxph(Surv(time, death) ~ age + sex + anemia + ef + ser_crt + ser_na + ser_crt*ser_na, ties = "exact", data = dta)
+summary(cox_modi5)
+
+
+
+
+```
+
+
+```{r}
+#### modification of categorical 
+cox_modi1 <- coxph(Surv(time, death) ~ age  + sex + anemia + ef + ser_crt_ab + ser_na + ser_crt_ab:age, ties = "exact", data = dta)
+summary(cox_modi1)
+
+cox_modi2 <- coxph(Surv(time, death) ~ age  + sex + anemia + ef + ser_crt_ab + ser_na + ser_crt_ab:sex, ties = "exact", data = dta)
+summary(cox_modi2)
+
+
+cox_modi3 <- coxph(Surv(time, death) ~ age + sex + anemia + ef + ser_crt_ab + ser_na + ser_crt_ab:anemia, ties = "exact", data = dta)
+summary(cox_modi3)
+
+cox_modi4 <- coxph(Surv(time, death) ~ age + sex + anemia + ef + ser_crt_ab + ser_na + ser_crt_ab:ef, ties = "exact", data = dta)
+summary(cox_modi4)
+
+cox_modi5 <- coxph(Surv(time, death) ~ age + sex + anemia + ef + ser_crt_ab + ser_na + ser_crt_ab:ser_na, ties = "exact", data = dta)
+summary(cox_modi5)
+```
+
+
+
+
+
+```{r}
+library(splines2)
+library(splines)
+nonlinear <- coxph(Surv(time, death) ~ age + sex + anemia + ef + ns(ser_crt, df = 3) + ser_na, ties = "exact", data = dta)
+range(dta$ser_crt)
+df <- dta[rep(1, 41),]
+df$ser_crt <- seq(0, 4, by = 0.1)
+predict <- predict(nonlinear, df, type = "lp", se = T, reference = "strata")
+predict$se.fit
+
+linear_differece <- predict$fit - predict$fit[1]
+linear_se <- sqrt(predict$se.fit^2 + (predict$se.fit[1])^2)
+
+gg_df <- tibble(crt = seq(0, 4, by = 0.1),
+                est = exp(predict$fit),
+                low = exp(predict$fit - 1.96*predict$se.fit),
+                up = exp(predict$fit + 1.96*predict$se.fit))
+ggplot(gg_df) + 
+        geom_point(aes(x = crt, y = est), color = "black") + 
+        geom_line(aes(x = crt, y = est), color = "black") + 
+        geom_ribbon(aes(x = crt, y = est, ymin = low, ymax = up), alpha = 0.5, fill = "red") +
+        theme_bw() + 
+        labs(y = "HR", x = "Serum creatinine (mg/dL)")
+ggsave("nonlinear.png", width = 125, height = 75, units = "mm", dpi = 300)
+```
